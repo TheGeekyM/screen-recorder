@@ -1,17 +1,47 @@
 {
   "name": "screen-recorder",
   "version": "0.1.0",
-  "description": "Screen recorder with annotation overlay",
+  "description": "Electron screen recorder with audio, floating control bar, region capture and a drawing overlay",
   "main": "main.js",
   "scripts": {
     "start": "electron . --no-sandbox --disable-gpu --in-process-gpu",
-    "smoke": "SMOKE=1 electron . --no-sandbox --disable-gpu --in-process-gpu 2>&1 | tee /dev/stderr | grep -q \"SMOKE PASS\""
+    "smoke": "SMOKE=1 electron . --no-sandbox --disable-gpu --in-process-gpu 2>&1 | tee /dev/stderr | grep -q \"SMOKE PASS\"",
+    "dist": "electron-builder --linux AppImage"
   },
   "type": "commonjs",
   "dependencies": {
     "fix-webm-duration": "^1.0.6"
   },
   "devDependencies": {
-    "electron": "^43.1.1"
-  }
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3"
+  },
+  "author": {
+    "name": "Mohamed Emad"
+  },
+  "license": "MIT",
+  "build": {
+    "appId": "com.thegeeky.recorder",
+    "productName": "Recorder",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "ui/**/*",
+      "node_modules/fix-webm-duration/**"
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "AudioVideo",
+      "icon": "build/icon.png",
+      "synopsis": "Screen recorder with audio and annotation",
+      "syncDesktopName": true
+    }
+  },
+  "desktopName": "recorder.desktop"
 }

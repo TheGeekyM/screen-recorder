@@ -4,3 +4,4 @@ out/
 *.webm
 *.log
 .DS_Store
+squashfs-root/
