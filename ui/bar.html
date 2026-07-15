@@ -1,0 +1,184 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data:">
+<title>Controls</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font: 13px 'Inter', system-ui, sans-serif; color: #eceef4;
+    height: 100vh; display: flex; flex-direction: column; justify-content: flex-end;
+    align-items: center; gap: 8px; background: transparent; overflow: hidden;
+    -webkit-user-select: none;
+  }
+  .pill {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 8px; border-radius: 999px;
+    background: rgba(20, 22, 29, .92);
+    border: 1px solid rgba(255, 255, 255, .1);
+    box-shadow: 0 14px 40px -8px rgba(0, 0, 0, .85);
+    backdrop-filter: blur(24px);
+  }
+  .grip {
+    -webkit-app-region: drag; cursor: grab;
+    padding: 0 5px; color: #5b6070; letter-spacing: 1px; font-size: 15px; line-height: 1;
+  }
+  .time {
+    display: flex; align-items: center; gap: 7px;
+    padding: 0 10px 0 4px; font-variant-numeric: tabular-nums;
+    font-weight: 600; font-size: 13.5px; letter-spacing: .02em;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #ff4757; animation: pulse 1.6s infinite; }
+  .dot.hold { animation: none; background: #f2b33d; }
+  @keyframes pulse { 50% { opacity: .25; transform: scale(.8); } }
+  .sep { width: 1px; height: 20px; background: rgba(255, 255, 255, .1); margin: 0 2px; }
+
+  button {
+    width: 34px; height: 34px; border: 0; border-radius: 50%;
+    background: transparent; color: #b9bece; cursor: pointer;
+    display: grid; place-items: center; transition: .15s;
+  }
+  button:hover { background: rgba(255, 255, 255, .1); color: #fff; }
+  button.on { background: rgba(124, 92, 255, .25); color: #b09bff; }
+  button.stop { background: #ff4757; color: #fff; width: 34px; border-radius: 50%; }
+  button.stop:hover { background: #ff6b78; }
+  button:disabled { opacity: .3; cursor: not-allowed; }
+  svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* pen toolbar */
+  .tools {
+    display: none; align-items: center; gap: 5px;
+    padding: 6px 8px; border-radius: 14px;
+    background: rgba(20, 22, 29, .92);
+    border: 1px solid rgba(255, 255, 255, .1);
+    box-shadow: 0 14px 40px -8px rgba(0, 0, 0, .85);
+    backdrop-filter: blur(24px);
+  }
+  .tools.on { display: flex; animation: pop .18s cubic-bezier(.2, .8, .2, 1); }
+  @keyframes pop { from { opacity: 0; transform: translateY(6px); } }
+  .tools button { width: 30px; height: 30px; border-radius: 8px; }
+  .swatch { width: 18px; height: 18px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; transition: .15s; }
+  .swatch:hover { transform: scale(1.15); }
+  .swatch.on { border-color: #fff; transform: scale(1.15); }
+  .size { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; cursor: pointer; }
+  .size i { background: currentColor; border-radius: 99px; display: block; color: #b9bece; }
+  .size.on { background: rgba(255, 255, 255, .12); }
+  .size.on i { color: #fff; }
+</style>
+
+<div class="tools" id="tools">
+  <button data-tool="pen" class="on" title="Pen">
+    <svg viewBox="0 0 24 24"><path d="M17 3.5a2.12 2.12 0 0 1 3 3L7.5 19 3 20.5 4.5 16z"/><path d="m14.5 6 3 3"/></svg>
+  </button>
+  <button data-tool="marker" title="Highlighter">
+    <svg viewBox="0 0 24 24"><path d="M13 3.5 20.5 11 12 19.5H7.5L4 16z"/><path d="M3 21.5h8"/><path d="m9.5 7 7.5 7.5"/></svg>
+  </button>
+  <button data-tool="arrow" title="Arrow">
+    <svg viewBox="0 0 24 24"><path d="M8 7h9v9"/><path d="M17 7 6.5 17.5"/></svg>
+  </button>
+  <button data-tool="rect" title="Rectangle">
+    <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/></svg>
+  </button>
+  <button data-tool="laser" title="Laser pointer">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/></svg>
+  </button>
+  <div class="sep"></div>
+  <div id="colors" style="display:flex;gap:5px;align-items:center"></div>
+  <div class="sep"></div>
+  <div id="sizes" style="display:flex;gap:2px;align-items:center"></div>
+  <div class="sep"></div>
+  <button id="fade" class="on" title="Strokes fade away">
+    <svg viewBox="0 0 24 24"><path d="M6 2h12M6 22h12"/><path d="M17 22v-3.6a2 2 0 0 0-.6-1.4L12 12l-4.4 4.9a2 2 0 0 0-.6 1.5V22"/><path d="M7 2v3.6a2 2 0 0 0 .6 1.4L12 12l4.4-5a2 2 0 0 0 .6-1.4V2"/></svg>
+  </button>
+  <button id="clear" title="Erase all">
+    <svg viewBox="0 0 24 24"><path d="m7 20.5-4-4a2 2 0 0 1 0-2.8l9-9a2 2 0 0 1 2.8 0l5 5a2 2 0 0 1 0 2.8l-8 8z"/><path d="M21.5 20.5H9"/><path d="m5.5 12 6.5 6.5"/></svg>
+  </button>
+</div>
+
+<div class="pill">
+  <div class="grip">⋮⋮</div>
+  <div class="time"><span class="dot" id="dot"></span><span id="t">00:00</span></div>
+  <div class="sep"></div>
+  <button id="pause" title="Pause"><svg viewBox="0 0 24 24" id="pause-i"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg></button>
+  <button id="mute" title="Mute mic"><svg viewBox="0 0 24 24" id="mute-i"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg></button>
+  <button id="pen" title="Draw"><svg viewBox="0 0 24 24"><path d="M17 3.5a2.12 2.12 0 0 1 3 3L7.5 19 3 20.5 4.5 16z"/><path d="m14.5 6 3 3"/></svg></button>
+  <div class="sep"></div>
+  <button class="stop" id="stop" title="Stop"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg></button>
+</div>
+
+<script>
+  const $ = s => document.querySelector(s)
+  const COLORS = ['#ff4757', '#ffd23f', '#2ee6a8', '#4da3ff', '#b09bff', '#ffffff']
+  let pen = { tool: 'pen', color: COLORS[0], size: 4, fade: true }
+  let on = false, paused = false, muted = false
+
+  // colors + sizes
+  COLORS.forEach((c, i) => {
+    const s = document.createElement('div')
+    s.className = 'swatch' + (i === 0 ? ' on' : '')
+    s.style.background = c
+    s.onclick = () => {
+      document.querySelectorAll('.swatch').forEach(x => x.classList.remove('on'))
+      s.classList.add('on'); pen.color = c; push()
+    }
+    $('#colors').append(s)
+  })
+  ;[[2, 6], [4, 10], [8, 14]].forEach(([w, d], i) => {
+    const b = document.createElement('div')
+    b.className = 'size' + (i === 1 ? ' on' : '')
+    b.innerHTML = `<i style="width:${d}px;height:${d}px"></i>`
+    b.onclick = () => {
+      document.querySelectorAll('.size').forEach(x => x.classList.remove('on'))
+      b.classList.add('on'); pen.size = w; push()
+    }
+    $('#sizes').append(b)
+  })
+
+  document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => {
+    document.querySelectorAll('[data-tool]').forEach(x => x.classList.remove('on'))
+    b.classList.add('on'); pen.tool = b.dataset.tool; push()
+  })
+  $('#fade').onclick = () => { pen.fade = !pen.fade; $('#fade').classList.toggle('on', pen.fade); push() }
+  $('#clear').onclick = () => window.api.pen.clear()
+
+  const push = () => window.api.pen.mode(on ? pen : { tool: 'off' })
+
+  // Keep the window exactly as big as what's painted — any transparent slack is a
+  // region that silently eats clicks and blocks the pen.
+  function fitWindow() {
+    const pill = $('.pill').getBoundingClientRect()
+    const tools = $('#tools')
+    const t = tools.classList.contains('on') ? tools.getBoundingClientRect() : null
+    const w = Math.ceil(Math.max(pill.width, t ? t.width : 0)) + 2
+    const h = Math.ceil(pill.height + (t ? t.height + 8 : 0)) + 2
+    window.api.barSize(w, h)
+  }
+
+  $('#pen').onclick = () => {
+    on = !on
+    $('#pen').classList.toggle('on', on)
+    $('#tools').classList.toggle('on', on)
+    fitWindow()
+    push()
+  }
+  $('#pause').onclick = () => window.api.ctl(paused ? 'resume' : 'pause')
+  $('#mute').onclick = () => window.api.ctl(muted ? 'unmute' : 'mute')
+  $('#stop').onclick = () => window.api.ctl('stop')
+
+  const PLAY = '<path d="M7 4l12 8-12 8V4z" fill="currentColor" stroke="none"/>'
+  const PAUSE = '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>'
+  const MIC = '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/>'
+  const MIC_OFF = '<path d="M1 1l22 22"/><path d="M9 9v3a3 3 0 0 0 5.1 2.1M15 12V5a3 3 0 0 0-5.9-.8"/><path d="M19 10v2a7 7 0 0 1-.6 2.8M15.5 18.7A7 7 0 0 1 5 12v-2"/><path d="M12 19v3"/>'
+
+  window.api.onState(s => {
+    $('#t').textContent = s.time
+    paused = s.paused; muted = s.muted
+    $('#dot').classList.toggle('hold', paused)
+    $('#pause-i').innerHTML = paused ? PLAY : PAUSE
+    $('#pause').title = paused ? 'Resume' : 'Pause'
+    $('#mute-i').innerHTML = muted ? MIC_OFF : MIC
+    $('#mute').disabled = !s.hasMic
+    $('#mute').title = !s.hasMic ? 'No microphone' : muted ? 'Unmute mic' : 'Mute mic'
+  })
+
+  addEventListener('load', fitWindow)
+</script>

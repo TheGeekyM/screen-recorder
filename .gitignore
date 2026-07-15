@@ -1,0 +1,6 @@
+node_modules/
+dist/
+out/
+*.webm
+*.log
+.DS_Store

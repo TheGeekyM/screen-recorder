@@ -1,0 +1,17 @@
+{
+  "name": "screen-recorder",
+  "version": "0.1.0",
+  "description": "Screen recorder with annotation overlay",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron . --no-sandbox --disable-gpu --in-process-gpu",
+    "smoke": "SMOKE=1 electron . --no-sandbox --disable-gpu --in-process-gpu 2>&1 | tee /dev/stderr | grep -q \"SMOKE PASS\""
+  },
+  "type": "commonjs",
+  "dependencies": {
+    "fix-webm-duration": "^1.0.6"
+  },
+  "devDependencies": {
+    "electron": "^43.1.1"
+  }
+}

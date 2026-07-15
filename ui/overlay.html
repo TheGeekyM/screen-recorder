@@ -1,0 +1,153 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data:">
+<title>Overlay</title>
+<style>
+  * { margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; cursor: none; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #cd {
+    position: fixed; inset: 0; display: none; place-items: center;
+    font: 700 150px 'Inter', system-ui, sans-serif; color: #fff;
+    text-shadow: 0 8px 60px rgba(0, 0, 0, .9);
+    pointer-events: none;
+  }
+  #cd.on { display: grid; }
+  #cd span { animation: beat .9s cubic-bezier(.2, .8, .2, 1); }
+  @keyframes beat { from { transform: scale(1.6); opacity: 0 } 60% { opacity: 1 } to { transform: scale(1); opacity: .9 } }
+</style>
+
+<canvas id="c"></canvas>
+<div id="cd"><span></span></div>
+
+<script>
+  const c = document.getElementById('c')
+  const x = c.getContext('2d')
+  const DPR = window.devicePixelRatio || 1
+  const fit = () => { c.width = innerWidth * DPR; c.height = innerHeight * DPR; x.scale(DPR, DPR) }
+  fit(); addEventListener('resize', fit)
+
+  const HOLD = 1600, FADE = 1400, LASER_TAIL = 550
+  let mode = { tool: 'off' }
+  let strokes = []      // {tool,color,size,pts,born,done}
+  let cur = null
+  let laser = []        // {x,y,t}
+  let origin = { x: 0, y: 0 }
+
+  window.api.overlayBounds().then(b => (origin = { x: b.x, y: b.y }))
+
+  const now = () => performance.now()
+  const drawing = () => ['pen', 'marker', 'arrow', 'rect'].includes(mode.tool)
+
+  // ---- input (drawing tools only; laser + off are click-through) ----
+  addEventListener('mousedown', e => {
+    if (!drawing()) return
+    cur = { tool: mode.tool, color: mode.color, size: mode.size, fade: mode.fade, pts: [{ x: e.clientX, y: e.clientY }], born: now() }
+    strokes.push(cur)
+  })
+  addEventListener('mousemove', e => {
+    if (!cur) return
+    const p = { x: e.clientX, y: e.clientY }
+    // arrow/rect are two-point shapes: keep origin, replace the end
+    if (cur.tool === 'arrow' || cur.tool === 'rect') cur.pts[1] = p
+    else cur.pts.push(p)
+    cur.born = now()
+  })
+  addEventListener('mouseup', () => { if (cur) { cur.done = true; cur.born = now(); cur = null } })
+
+  window.api.pen.onMode(m => {
+    mode = m || { tool: 'off' }
+    document.body.style.cursor = drawing() ? 'crosshair' : 'none'
+    if (m && m.countdown != null) showCd(m.countdown)
+    if (!drawing() && cur) { cur.done = true; cur = null }
+    if (mode.tool !== 'laser') laser = []
+  })
+  window.api.pen.onClear(() => { strokes = []; cur = null })
+  // the mouse was handed back to the control bar mid-drag — close the stroke off
+  window.api.pen.onEndStroke(() => { if (cur) { cur.done = true; cur.born = now(); cur = null } })
+
+  function showCd(n) {
+    const d = document.getElementById('cd')
+    if (n <= 0) return d.classList.remove('on')
+    d.classList.add('on')
+    d.innerHTML = `<span>${n}</span>`
+  }
+
+  // ---- render ----
+  function alphaOf(s) {
+    if (!s.fade || !s.done) return 1
+    const age = now() - s.born
+    if (age < HOLD) return 1
+    return Math.max(0, 1 - (age - HOLD) / FADE)
+  }
+
+  function path(s) {
+    const p = s.pts
+    x.beginPath()
+    if (s.tool === 'rect') {
+      const [a, b] = p
+      if (b) x.rect(a.x, a.y, b.x - a.x, b.y - a.y)
+    } else if (s.tool === 'arrow') {
+      const [a, b] = p
+      if (!b) return
+      x.moveTo(a.x, a.y); x.lineTo(b.x, b.y)
+      const ang = Math.atan2(b.y - a.y, b.x - a.x)
+      const h = Math.max(10, s.size * 3)
+      x.moveTo(b.x, b.y); x.lineTo(b.x - h * Math.cos(ang - .4), b.y - h * Math.sin(ang - .4))
+      x.moveTo(b.x, b.y); x.lineTo(b.x - h * Math.cos(ang + .4), b.y - h * Math.sin(ang + .4))
+    } else {
+      x.moveTo(p[0].x, p[0].y)
+      // quadratic midpoints -> smooth freehand instead of visible segments
+      for (let i = 1; i < p.length - 1; i++) {
+        const m = { x: (p[i].x + p[i + 1].x) / 2, y: (p[i].y + p[i + 1].y) / 2 }
+        x.quadraticCurveTo(p[i].x, p[i].y, m.x, m.y)
+      }
+      if (p.length > 1) x.lineTo(p[p.length - 1].x, p[p.length - 1].y)
+      else x.lineTo(p[0].x + .1, p[0].y + .1)
+    }
+    x.stroke()
+  }
+
+  async function frame() {
+    x.clearRect(0, 0, c.width, c.height)
+    x.lineCap = 'round'; x.lineJoin = 'round'
+
+    strokes = strokes.filter(s => alphaOf(s) > 0)
+    for (const s of strokes) {
+      x.save()
+      x.globalAlpha = alphaOf(s) * (s.tool === 'marker' ? .35 : 1)
+      x.strokeStyle = s.color
+      x.lineWidth = s.tool === 'marker' ? s.size * 5 : s.size
+      if (s.tool !== 'marker') { x.shadowColor = s.color; x.shadowBlur = 6 }
+      path(s)
+      x.restore()
+    }
+
+    if (mode.tool === 'laser') {
+      // click-through, so the OS cursor is the only source of truth
+      const p = await window.api.cursor()
+      laser.push({ x: p.x - origin.x, y: p.y - origin.y, t: now() })
+      laser = laser.filter(q => now() - q.t < LASER_TAIL)
+      for (let i = 1; i < laser.length; i++) {
+        const a = 1 - (now() - laser[i].t) / LASER_TAIL
+        x.save()
+        x.globalAlpha = a * .8
+        x.strokeStyle = mode.color || '#ff4757'
+        x.lineWidth = (mode.size || 4) * 1.5 * a
+        x.shadowColor = mode.color || '#ff4757'; x.shadowBlur = 14
+        x.beginPath(); x.moveTo(laser[i - 1].x, laser[i - 1].y); x.lineTo(laser[i].x, laser[i].y); x.stroke()
+        x.restore()
+      }
+      const head = laser[laser.length - 1]
+      if (head) {
+        x.save()
+        x.fillStyle = mode.color || '#ff4757'
+        x.shadowColor = mode.color || '#ff4757'; x.shadowBlur = 22
+        x.beginPath(); x.arc(head.x, head.y, (mode.size || 4) * 1.4, 0, 7); x.fill()
+        x.restore()
+      }
+    }
+    requestAnimationFrame(frame)
+  }
+  frame()
+</script>

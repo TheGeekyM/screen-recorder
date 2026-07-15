@@ -1,0 +1,118 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data:">
+<title>Select region</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; cursor: crosshair; -webkit-user-select: none; }
+  body { background: rgba(8, 9, 12, .45); font: 13px 'Inter', system-ui, sans-serif; color: #eceef4; }
+  /* once a box exists, #sel's outer shadow supplies the dim — drop the body wash so
+     the chosen area shows the real screen instead of a dimmed guess */
+  body.has-sel { background: transparent; }
+
+  /* the selection is a hole punched through the dim via a huge outer shadow */
+  #sel {
+    position: fixed; display: none;
+    border: 1px solid #7c5cff;
+    box-shadow: 0 0 0 9999px rgba(8, 9, 12, .45), 0 0 24px rgba(124, 92, 255, .55);
+    background: transparent;
+  }
+  #sel.on { display: block; }
+  #sel .grip {
+    position: absolute; width: 7px; height: 7px; border-radius: 50%;
+    background: #fff; border: 1.5px solid #7c5cff;
+  }
+  .nw { top: -4px; left: -4px } .ne { top: -4px; right: -4px }
+  .sw { bottom: -4px; left: -4px } .se { bottom: -4px; right: -4px }
+
+  #size {
+    position: fixed; display: none;
+    padding: 5px 10px; border-radius: 8px;
+    background: rgba(20, 22, 29, .95); border: 1px solid rgba(255, 255, 255, .12);
+    font-variant-numeric: tabular-nums; font-weight: 600; letter-spacing: .02em;
+    white-space: nowrap; pointer-events: none;
+  }
+  #size.on { display: block; }
+
+  #hint {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: 46px; padding: 11px 18px; border-radius: 12px;
+    background: rgba(20, 22, 29, .95); border: 1px solid rgba(255, 255, 255, .12);
+    box-shadow: 0 18px 50px -10px rgba(0, 0, 0, .9);
+    display: flex; align-items: center; gap: 12px;
+  }
+  #hint b { font-weight: 600; }
+  kbd {
+    font: inherit; font-size: 11px; font-weight: 600;
+    padding: 3px 7px; border-radius: 5px;
+    background: rgba(255, 255, 255, .1); border: 1px solid rgba(255, 255, 255, .14);
+  }
+  .dim { color: #8d93a6; }
+</style>
+
+<div id="sel">
+  <i class="grip nw"></i><i class="grip ne"></i><i class="grip sw"></i><i class="grip se"></i>
+</div>
+<div id="size"></div>
+<div id="hint"><b id="hint-txt">Drag to choose the area to record</b><span class="dim">·</span>
+  <span class="dim"><kbd>Esc</kbd> cancel</span>
+</div>
+
+<script>
+  const sel = document.getElementById('sel')
+  const size = document.getElementById('size')
+  const hint = document.getElementById('hint')
+  const hintTxt = document.getElementById('hint-txt')
+  let a = null, rect = null, dragging = false
+
+  const norm = (p, q) => ({
+    x: Math.min(p.x, q.x), y: Math.min(p.y, q.y),
+    width: Math.abs(p.x - q.x), height: Math.abs(p.y - q.y),
+  })
+
+  function paint(r) {
+    sel.classList.add('on')
+    document.body.classList.add('has-sel')
+    sel.style.left = r.x + 'px'; sel.style.top = r.y + 'px'
+    sel.style.width = r.width + 'px'; sel.style.height = r.height + 'px'
+    size.classList.add('on')
+    size.textContent = `${Math.round(r.width)} × ${Math.round(r.height)}`
+    // keep the readout on-screen when the box is near an edge
+    const above = r.y > 34
+    size.style.left = Math.min(r.x, innerWidth - 110) + 'px'
+    size.style.top = (above ? r.y - 30 : r.y + r.height + 8) + 'px'
+  }
+
+  addEventListener('mousedown', e => {
+    a = { x: e.clientX, y: e.clientY }
+    dragging = true
+    rect = null
+  })
+  addEventListener('mousemove', e => {
+    if (!dragging) return
+    rect = norm(a, { x: e.clientX, y: e.clientY })
+    paint(rect)
+  })
+  addEventListener('mouseup', e => {
+    if (!dragging) return
+    dragging = false
+    rect = norm(a, { x: e.clientX, y: e.clientY })
+    // a stray click isn't a region
+    if (rect.width < 12 || rect.height < 12) {
+      rect = null
+      sel.classList.remove('on'); size.classList.remove('on')
+      document.body.classList.remove('has-sel')
+      return
+    }
+    paint(rect)
+    hintTxt.innerHTML = `<b>${Math.round(rect.width)} × ${Math.round(rect.height)}</b> — <kbd>Enter</kbd> to use · drag again to redo`
+  })
+
+  addEventListener('keydown', e => {
+    if (e.key === 'Escape') window.api.regionDone(null)
+    if (e.key === 'Enter' && rect) window.api.regionDone({
+      x: Math.round(rect.x), y: Math.round(rect.y),
+      width: Math.round(rect.width), height: Math.round(rect.height),
+    })
+  })
+</script>
