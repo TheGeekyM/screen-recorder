@@ -1,7 +1,8 @@
 <div align="center">
   <img src="assets/icon-256.png" width="96" alt="">
   <h1>Recorder</h1>
-  <p>Screen recorder with audio, a floating control bar, region capture and a drawing overlay.<br>
+  <p>Screen recorder with audio, a floating control bar, region capture, a drawing overlay
+  — and a built-in editor.<br>
   Electron + <code>getDisplayMedia</code> → <code>MediaRecorder</code> → mp4 or webm.</p>
 </div>
 
@@ -16,6 +17,7 @@
 - **mp4 or webm** — mp4 (H.264/AAC) plays everywhere; webm (VP9/Opus) is smaller at the same quality
 - **Quality up to 80 Mbps** at 60 fps — visually lossless for screen content
 - **Global hotkeys** that work while the app is hidden
+- **Edit without leaving the app** — trim, text, blur, music and colour, on a timeline
 
 ## The control bar
 
@@ -32,6 +34,19 @@ Drag an area, confirm with <kbd>Enter</kbd>. The selection stays clear while eve
 so you can see what you're about to record.
 
 ![Region selection](assets/shot-region.png)
+
+## Editor
+
+Open any video (or jump straight from a recording) and edit it on a timeline: trim, overlay text
+with fade in/out, blur a region to hide something, add background music, and grade the colour.
+
+![Editor](assets/shot-editor.png)
+
+Preview is DOM + CSS — `filter` for colour, `backdrop-filter` for blur, positioned elements for
+text — so scrubbing stays real-time with no render engine. **Export translates those same values
+into an ffmpeg filter graph**, which is why the preview matches the file.
+
+Trim on its own is a stream copy: instant and lossless, no re-encode.
 
 ## Settings
 
@@ -92,6 +107,15 @@ isn't H.264, it falls back to a real `libx264` encode. A failed conversion keeps
 than losing the recording.
 
 `ffmpeg-static` must be in `asarUnpack` — a binary inside `app.asar` can't be executed.
+
+### Editor gotchas
+
+- **`-ss` before `-i` rebases filter time to zero.** Every `enable='between(t,…)'` window is
+  offset by the trim start, or overlays fire at the wrong moment.
+- **Text is rasterised to a PNG in the renderer**, not drawn with `drawtext`. That keeps fonts and
+  emoji identical to the preview and avoids shipping fontconfig in the AppImage. Each PNG is a
+  looped still, faded on the alpha channel and shifted with `setpts`.
+- **ffprobe isn't bundled** — audio presence is detected by parsing what `ffmpeg -i` prints.
 
 ### Why region capture uses a canvas
 

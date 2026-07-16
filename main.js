@@ -1,7 +1,7 @@
 const { app, BrowserWindow, desktopCapturer, session, ipcMain, globalShortcut, screen, shell, dialog, Menu } = require('electron')
 const fs = require('fs')
 const path = require('path')
-const { execFile } = require('child_process')
+const { execFile, spawn } = require('child_process')
 
 // ffmpeg-static resolves inside the asar, where it can't be executed; the real
 // binary lives in app.asar.unpacked (see build.asarUnpack).
@@ -332,6 +332,170 @@ ipcMain.handle('pen:mode', (e, mode) => {
   toOverlay('mode', mode)
 })
 ipcMain.handle('pen:clear', () => toOverlay('clear'))
+// ---------- editor ----------
+
+let edWin = null
+
+function createEditor(file) {
+  if (edWin && !edWin.isDestroyed()) {
+    edWin.focus()
+    if (file) edWin.webContents.send('ed:open', file)
+    return
+  }
+  edWin = new BrowserWindow({
+    width: 1180, height: 810, minWidth: 960, minHeight: 640,
+    backgroundColor: '#0d0e12', frame: false,
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), backgroundThrottling: false },
+  })
+  edWin.loadFile(path.join(__dirname, 'ui', 'editor.html'))
+  edWin.on('closed', () => { edWin = null })
+  if (file) edWin.webContents.once('did-finish-load', () => edWin.webContents.send('ed:open', file))
+}
+
+ipcMain.handle('ed:open', (e, file) => createEditor(file))
+ipcMain.handle('ed:close', () => edWin && !edWin.isDestroyed() && edWin.close())
+
+ipcMain.handle('ed:pick-video', async () => {
+  const r = await dialog.showOpenDialog(edWin, {
+    properties: ['openFile'], defaultPath: settings.saveDir,
+    filters: [{ name: 'Video', extensions: ['mp4', 'webm', 'mkv', 'mov', 'avi', 'm4v'] }],
+  })
+  return r.canceled ? null : r.filePaths[0]
+})
+ipcMain.handle('ed:pick-audio', async () => {
+  const r = await dialog.showOpenDialog(edWin, {
+    properties: ['openFile'],
+    filters: [{ name: 'Audio', extensions: ['mp3', 'm4a', 'aac', 'wav', 'ogg', 'opus', 'flac'] }],
+  })
+  return r.canceled ? null : r.filePaths[0]
+})
+ipcMain.handle('ed:save-as', async (e, src) => {
+  const base = path.basename(src).replace(/\.[^.]+$/, '')
+  const r = await dialog.showSaveDialog(edWin, {
+    defaultPath: path.join(settings.saveDir, `${base}-edited.mp4`),
+    filters: [{ name: 'mp4', extensions: ['mp4'] }],
+  })
+  return r.canceled ? null : r.filePath
+})
+ipcMain.handle('ed:reveal', (e, f) => shell.showItemInFolder(f))
+
+// Does the source actually have an audio stream? ffprobe isn't bundled, so ask
+// ffmpeg and read what it prints about the input.
+const hasAudio = src => new Promise(res => {
+  execFile(FFMPEG, ['-hide_banner', '-i', src], (err, stdout, stderr) =>
+    res(/Stream #\d+:\d+.*: Audio:/.test(String(stderr))))
+})
+
+function buildArgs(job, pngs, audio) {
+  const { trim, eq, blurs, texts, music, fade } = job
+  const len = trim.b - trim.a
+  // -ss/-to before -i seeks fast; filter time `t` then restarts at 0, so every
+  // overlay window has to be rebased by trim.a.
+  const args = ['-y', '-ss', String(trim.a), '-to', String(trim.b), '-i', job.src]
+
+  const rel = t => Math.max(0, t - trim.a)
+  texts.forEach((t, i) => {
+    const d = Math.max(0.1, rel(t.to) - rel(t.from))
+    args.push('-loop', '1', '-t', String(d), '-i', pngs[i])
+  })
+  let musicIdx = -1
+  if (music) { musicIdx = 1 + texts.length; args.push('-i', music.path) }
+
+  const fc = []
+  let cur = '0:v'
+  const eqOn = eq.brightness !== 1 || eq.contrast !== 1 || eq.saturate !== 1
+  if (eqOn) {
+    // CSS brightness is multiplicative around 1; ffmpeg eq brightness is additive.
+    fc.push(`[${cur}]eq=brightness=${(eq.brightness - 1).toFixed(3)}:contrast=${eq.contrast.toFixed(3)}:saturation=${eq.saturate.toFixed(3)}[eq]`)
+    cur = 'eq'
+  }
+  blurs.forEach((b, i) => {
+    const w = Math.max(2, b.w - (b.w % 2)), h = Math.max(2, b.h - (b.h % 2))
+    fc.push(`[${cur}]split[bm${i}][bs${i}]`)
+    fc.push(`[bs${i}]crop=${w}:${h}:${b.x}:${b.y},boxblur=${Math.round(b.strength / 2)}:1[bb${i}]`)
+    fc.push(`[bm${i}][bb${i}]overlay=${b.x}:${b.y}:enable='between(t,${rel(b.from).toFixed(3)},${rel(b.to).toFixed(3)})'[bo${i}]`)
+    cur = `bo${i}`
+  })
+  texts.forEach((t, i) => {
+    const a = rel(t.from), z = rel(t.to), d = Math.max(0.1, z - a)
+    const f = t.fade
+      ? `,fade=in:st=0:d=${fade}:alpha=1,fade=out:st=${Math.max(0, d - fade).toFixed(3)}:d=${fade}:alpha=1`
+      : ''
+    // shift the looped still to its start time, then gate it with enable
+    fc.push(`[${i + 1}:v]format=rgba${f},setpts=PTS+${a.toFixed(3)}/TB[tx${i}]`)
+    fc.push(`[${cur}][tx${i}]overlay=${t.x}:${t.y}:enable='between(t,${a.toFixed(3)},${z.toFixed(3)})'[to${i}]`)
+    cur = `to${i}`
+  })
+
+  let aOut = null
+  if (audio && music) {
+    fc.push(`[0:a]volume=1[a0]`)
+    fc.push(`[${musicIdx}:a]volume=${music.volume.toFixed(2)}[a1]`)
+    fc.push(`[a0][a1]amix=inputs=2:duration=first:dropout_transition=0[aout]`)
+    aOut = 'aout'
+  } else if (music) {
+    fc.push(`[${musicIdx}:a]volume=${music.volume.toFixed(2)},atrim=0:${len.toFixed(3)}[aout]`)
+    aOut = 'aout'
+  }
+
+  if (fc.length) args.push('-filter_complex', fc.join(';'), '-map', `[${cur}]`)
+  else args.push('-map', '0:v')
+  if (aOut) args.push('-map', `[${aOut}]`)
+  else if (audio) args.push('-map', '0:a')
+
+  args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p')
+  if (aOut || audio) args.push('-c:a', 'aac', '-b:a', '192k')
+  args.push('-movflags', '+faststart', job.out)
+  return args
+}
+
+async function runExport(job) {
+  const tmp = fs.mkdtempSync(path.join(app.getPath('temp'), 'rec-ed-'))
+  const send = (pct, label) => edWin && !edWin.isDestroyed() && edWin.webContents.send('ed:progress', { pct, label })
+  try {
+    const pngs = job.texts.map((t, i) => {
+      const f = path.join(tmp, `t${i}.png`)
+      fs.writeFileSync(f, Buffer.from(t.data.split(',')[1], 'base64'))
+      return f
+    })
+    const audio = await hasAudio(job.src)
+    const untouched = !job.blurs.length && !job.texts.length && !job.music &&
+      job.eq.brightness === 1 && job.eq.contrast === 1 && job.eq.saturate === 1
+
+    // trim-only: stream copy, so it's instant and lossless
+    const args = untouched
+      ? ['-y', '-ss', String(job.trim.a), '-to', String(job.trim.b), '-i', job.src,
+         '-c', 'copy', '-movflags', '+faststart', job.out]
+      : buildArgs(job, pngs, audio)
+
+    send(6, untouched ? 'Trimming (lossless)…' : 'Rendering…')
+    const total = Math.max(0.1, job.trim.b - job.trim.a)
+    await new Promise((res, rej) => {
+      const p = spawn(FFMPEG, args)
+      let log = ''
+      p.stderr.on('data', d => {
+        const s = String(d)
+        log += s
+        const m = /time=(\d+):(\d+):([\d.]+)/.exec(s)
+        if (m) {
+          const done = (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3])
+          send(Math.round((done / total) * 100), `${done.toFixed(1)}s of ${total.toFixed(1)}s`)
+        }
+      })
+      p.on('error', rej)
+      p.on('close', c => (c === 0 ? res() : rej(new Error(log.split('\n').filter(Boolean).slice(-4).join('\n')))))
+    })
+    return { ok: true, file: job.out }
+  } catch (e) {
+    return { ok: false, error: e.message }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+}
+
+ipcMain.handle('ed:export', (e, job) => runExport(job))
+
 ipcMain.handle('cursor:pos', () => screen.getCursorScreenPoint())
 ipcMain.handle('overlay:bounds', () => (overlayWin ? overlayWin.getBounds() : screen.getPrimaryDisplay().bounds))
 

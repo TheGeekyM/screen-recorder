@@ -39,5 +39,17 @@ contextBridge.exposeInMainWorld('api', {
   cursor: () => inv('cursor:pos'),
   overlayBounds: () => inv('overlay:bounds'),
 
+  ed: {
+    open: f => inv('ed:open', f),
+    close: () => inv('ed:close'),
+    pickVideo: () => inv('ed:pick-video'),
+    pickAudio: () => inv('ed:pick-audio'),
+    saveAs: src => inv('ed:save-as', src),
+    export: job => inv('ed:export', job),
+    reveal: f => inv('ed:reveal', f),
+    onOpen: fn => on('ed:open', fn),
+    onProgress: fn => on('ed:progress', fn),
+  },
+
   platform: process.platform,
 })

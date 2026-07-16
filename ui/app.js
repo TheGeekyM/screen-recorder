@@ -405,6 +405,8 @@ $('#t-sys').onclick = () => window.api.settings.set({ systemAudio: !S.systemAudi
 
 $('#pv-done').onclick = () => { $('#pv').src = ''; $('#preview').classList.remove('on') }
 $('#pv-folder').onclick = () => window.api.file.reveal(lastFile)
+$('#pv-edit').onclick = () => { $('#pv').src = ''; $('#preview').classList.remove('on'); window.api.ed.open(lastFile) }
+$('#open-editor').onclick = () => window.api.ed.open(null)
 $('#pv-del').onclick = async () => {
   $('#pv').src = ''
   await window.api.file.remove(lastFile)

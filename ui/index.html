@@ -12,6 +12,11 @@
       <button data-tab="record" class="on">Record</button>
       <button data-tab="settings">Settings</button>
     </div>
+    <button class="icon-btn" id="open-editor" title="Open a video in the editor">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 5.5h16v13H4z"/><path d="M9 5.5v13M15 5.5v13"/><path d="M4 12h16"/>
+      </svg>
+    </button>
     <div class="wctl" id="wctl">
       <button class="icon-btn" id="w-min" title="Minimize">
         <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 12h12"/></svg>
@@ -71,6 +76,7 @@
       <div class="info"><b id="pv-name">recording.webm</b><span id="pv-meta"></span></div>
       <button class="btn danger" id="pv-del">Delete</button>
       <button class="btn" id="pv-folder">Show in folder</button>
+      <button class="btn" id="pv-edit">Edit…</button>
       <button class="btn primary" id="pv-done">Done</button>
     </div>
   </div>

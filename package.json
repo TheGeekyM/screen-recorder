@@ -1,6 +1,6 @@
 {
   "name": "screen-recorder",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Electron screen recorder with audio, floating control bar, region capture and a drawing overlay",
   "main": "main.js",
   "scripts": {
