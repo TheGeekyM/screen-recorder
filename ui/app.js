@@ -187,12 +187,11 @@ async function buildStream() {
 }
 
 function pickMime() {
-  const want = [
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8,opus',
-    'video/webm;codecs=h264,opus',
-    'video/webm',
-  ]
+  // For mp4 we record H.264 up front so the rewrap can stream-copy the video
+  // instead of transcoding it. VP9 is better for webm: smaller at the same quality.
+  const want = S.format === 'mp4'
+    ? ['video/webm;codecs=h264,opus', 'video/webm;codecs=vp9,opus', 'video/webm']
+    : ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
   return want.find(m => MediaRecorder.isTypeSupported(m)) || ''
 }
 
@@ -273,7 +272,8 @@ async function finish() {
   await window.api.stopped()          // closes bar + overlay, reshows main
 
   if (!blob.size) return toast('Nothing was recorded')
-  const { file, size } = await window.api.save(await blob.arrayBuffer(), 'webm')
+  const { file, size, warning } = await window.api.save(await blob.arrayBuffer(), S.format)
+  if (warning) toast(warning)
   lastFile = file
 
   $('#pv').src = 'file://' + file
@@ -343,18 +343,24 @@ async function renderSettings() {
     return w
   }
   const set = p => window.api.settings.set(p).then(n => { S = n; syncFooter() })
+  const K = (node, k) => { node.dataset.k = k; return node }
 
-  row('Quality', 'Higher bitrate = sharper text, bigger files', sel(QUALITY, S.quality, v => set({ quality: v })))
-  row('Frame rate', 'Smoothness of motion and scrolling', sel([[30, '30 fps'], [60, '60 fps']], String(S.fps), v => set({ fps: +v })))
-  row('Microphone', 'Voice track mixed into the recording', sel(
+  row('Format', 'mp4 plays everywhere; webm is smaller at the same quality',
+    K(sel([['mp4', 'mp4 · H.264'], ['webm', 'webm · VP9']], S.format, v => set({ format: v })), 'format'))
+  row('Quality', 'Higher bitrate = sharper text, bigger files',
+    K(sel(QUALITY, S.quality, v => set({ quality: v })), 'quality'))
+  row('Frame rate', 'Smoothness of motion and scrolling',
+    K(sel([[30, '30 fps'], [60, '60 fps']], String(S.fps), v => set({ fps: +v })), 'fps'))
+  row('Microphone', 'Voice track mixed into the recording', K(sel(
     [['default', 'System default'], ...mics.map(d => [d.deviceId, d.label || 'Microphone'])],
-    S.micId, v => set({ micId: v })))
+    S.micId, v => set({ micId: v })), 'micId'))
   row('Clean up mic audio', 'Filters fans, hiss and room hum — keeps voice and clicks', sw(S.denoise, v => set({ denoise: v })))
   row('System audio', window.api.platform === 'darwin'
     ? 'macOS needs a loopback device (e.g. BlackHole) selected as the mic'
     : 'Records what you hear', sw(S.systemAudio, v => set({ systemAudio: v })))
   row('Show cursor', 'Include the mouse pointer in the video', sw(S.showCursor, v => set({ showCursor: v })))
-  row('Countdown', 'Delay before recording actually starts', sel([[0, 'Off'], [3, '3 seconds'], [5, '5 seconds']], String(S.countdown), v => set({ countdown: +v })))
+  row('Countdown', 'Delay before recording actually starts',
+    K(sel([[0, 'Off'], [3, '3 seconds'], [5, '5 seconds']], String(S.countdown), v => set({ countdown: +v })), 'countdown'))
 
   const dir = el('button', 'btn', 'Change…')
   dir.onclick = async () => { const d = await window.api.pickDir(); if (d) { await set({ saveDir: d }); renderSettings() } }

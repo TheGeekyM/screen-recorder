@@ -2,7 +2,7 @@
   <img src="assets/icon-256.png" width="96" alt="">
   <h1>Recorder</h1>
   <p>Screen recorder with audio, a floating control bar, region capture and a drawing overlay.<br>
-  Electron + <code>getDisplayMedia</code> → <code>MediaRecorder</code> → webm. No ffmpeg, no native deps.</p>
+  Electron + <code>getDisplayMedia</code> → <code>MediaRecorder</code> → mp4 or webm.</p>
 </div>
 
 ![Recorder](assets/shot-main.png)
@@ -13,6 +13,7 @@
 - **Audio** — microphone and system audio, mixed into one track, with noise suppression on by default
 - **Floating control bar** — timer, pause/resume, mic mute, stop; drag it anywhere
 - **Draw while recording** — pen, highlighter, arrow, rectangle, laser pointer, with strokes that fade away on their own
+- **mp4 or webm** — mp4 (H.264/AAC) plays everywhere; webm (VP9/Opus) is smaller at the same quality
 - **Quality up to 80 Mbps** at 60 fps — visually lossless for screen content
 - **Global hotkeys** that work while the app is hidden
 
@@ -81,6 +82,16 @@ or a machine whose GPU process can't reach the X display).
   loopback device — pick BlackHole (or similar) as the microphone instead.
 - **Linux needs a real session bus for audio.** If `XDG_RUNTIME_DIR` is unset, PulseAudio won't
   connect and capture silently falls back to video-only.
+
+### Why mp4 goes through ffmpeg
+
+`MediaRecorder` here can't emit mp4 (`isTypeSupported('video/mp4…')` is false), so mp4 means:
+record **H.264 inside a webm container**, then rewrap with a bundled `ffmpeg-static`. The video is
+stream-copied (instant) and only Opus → AAC is re-encoded, which is cheap. If the video somehow
+isn't H.264, it falls back to a real `libx264` encode. A failed conversion keeps the webm rather
+than losing the recording.
+
+`ffmpeg-static` must be in `asarUnpack` — a binary inside `app.asar` can't be executed.
 
 ### Why region capture uses a canvas
 

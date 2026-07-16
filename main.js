@@ -1,11 +1,17 @@
 const { app, BrowserWindow, desktopCapturer, session, ipcMain, globalShortcut, screen, shell, dialog, Menu } = require('electron')
 const fs = require('fs')
 const path = require('path')
+const { execFile } = require('child_process')
+
+// ffmpeg-static resolves inside the asar, where it can't be executed; the real
+// binary lives in app.asar.unpacked (see build.asarUnpack).
+const FFMPEG = require('ffmpeg-static').replace('app.asar' + path.sep, 'app.asar.unpacked' + path.sep)
 
 // ponytail: plain JSON file instead of electron-store — it's a read and a write.
 const SETTINGS_FILE = () => path.join(app.getPath('userData'), 'settings.json')
 const DEFAULTS = {
   quality: 'ultra',            // high | ultra | max
+  format: 'mp4',               // mp4 | webm
   fps: 60,
   micId: 'default',
   systemAudio: true,
@@ -49,13 +55,15 @@ function createMain() {
 }
 
 function createBar() {
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize
+  // same display as the recording, so the controls sit on the screen being captured
+  const d = displayFor(selectedSource && selectedSource.display_id)
+  const { x: dx, y: dy, width, height } = d.workArea
   // Sized to the pill; the renderer re-measures whenever the pen toolbar opens.
   // A transparent window still swallows clicks, so any slack here would become an
   // invisible dead zone the pen can't draw on.
   const W = 340, H = 52
   barWin = new BrowserWindow({
-    width: W, height: H, x: Math.round((width - W) / 2), y: height - H - 16,
+    width: W, height: H, x: dx + Math.round((width - W) / 2), y: dy + height - H - 16,
     frame: false, transparent: true, resizable: false, movable: true,
     alwaysOnTop: true, skipTaskbar: true, fullscreenable: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js') },
@@ -75,7 +83,9 @@ function createBar() {
 const closeBar = () => { barWin && !barWin.isDestroyed() && barWin.close(); barWin = null }
 
 function createOverlay() {
-  const d = screen.getPrimaryDisplay()
+  // Follow the display being recorded. Hard-coding the primary display puts the pen
+  // on the wrong monitor, so annotations never make it into the video.
+  const d = displayFor(selectedSource && selectedSource.display_id)
   overlayWin = new BrowserWindow({
     ...d.bounds,
     frame: false, transparent: true, resizable: false, movable: false,
@@ -244,13 +254,39 @@ ipcMain.handle('rec:stopped', () => {
   if (mainWin) { mainWin.show(); mainWin.focus() }
 })
 
-ipcMain.handle('rec:save', (e, buf, ext) => {
+const ffmpeg = args => new Promise((res, rej) =>
+  execFile(FFMPEG, args, err => (err ? rej(err) : res())))
+
+// MediaRecorder can't emit mp4 here, so mp4 means: record H.264 in a webm
+// container, then rewrap. Video is stream-copied (instant); only Opus -> AAC is
+// re-encoded, which is cheap. If the video isn't H.264, fall back to a real encode.
+async function toMp4(src) {
+  const out = src.replace(/\.webm$/, '.mp4')
+  const tail = ['-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', out]
+  try {
+    await ffmpeg(['-y', '-i', src, '-c:v', 'copy', ...tail])
+  } catch {
+    await ffmpeg(['-y', '-i', src, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', ...tail])
+  }
+  return out
+}
+
+ipcMain.handle('rec:save', async (e, buf, format) => {
   const dir = settings.saveDir
   fs.mkdirSync(dir, { recursive: true })
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-  const file = path.join(dir, `recording-${stamp}.${ext || 'webm'}`)
-  fs.writeFileSync(file, Buffer.from(buf))
-  return { file, size: fs.statSync(file).size }
+  const webm = path.join(dir, `recording-${stamp}.webm`)
+  fs.writeFileSync(webm, Buffer.from(buf))
+
+  if (format !== 'mp4') return { file: webm, size: fs.statSync(webm).size }
+  try {
+    const mp4 = await toMp4(webm)
+    fs.unlinkSync(webm)
+    return { file: mp4, size: fs.statSync(mp4).size }
+  } catch (err) {
+    // a failed conversion must never lose the recording
+    return { file: webm, size: fs.statSync(webm).size, warning: 'Could not convert to mp4 — kept the webm' }
+  }
 })
 
 ipcMain.handle('win:minimize', () => mainWin && mainWin.minimize())
@@ -317,15 +353,14 @@ if (process.env.SMOKE) {
         const st = JSON.parse(await js(`(async () => {
           document.querySelector('[data-tab=settings]').click()
           await new Promise(r => setTimeout(r, 600))
-          const v = [...document.querySelectorAll('#settings-form select')].map(s => s.value)
+          const got = {}
+          for (const n of document.querySelectorAll('#settings-form [data-k]')) got[n.dataset.k] = n.value
           document.querySelector('[data-tab=record]').click()
-          return JSON.stringify({ v, quality: S.quality, fps: S.fps, countdown: S.countdown })
+          return JSON.stringify({ got, want: { format: S.format, quality: S.quality, fps: String(S.fps), countdown: String(S.countdown) } })
         })()`))
-        const want = [String(st.quality), String(st.fps), String(st.countdown)]
-        const got = [st.v[0], st.v[1], st.v[3]]
-        const ok = want.every((w, i) => w === got[i])
-        console.log(`SMOKE settings ${ok ? 'ok' : 'MISMATCH'} want=${want} got=${got}`)
-        if (!ok) return done(false, 'settings form does not reflect stored values')
+        const bad = Object.entries(st.want).filter(([k, v]) => st.got[k] !== v)
+        console.log(`SMOKE settings ${bad.length ? 'MISMATCH' : 'ok'} ${JSON.stringify(st.got)}`)
+        if (bad.length) return done(false, 'settings form does not reflect stored values: ' + JSON.stringify(bad))
 
         // region crop: the canvas must come out at exactly the requested size
         const crop = JSON.parse(await js(`(async () => {
@@ -362,9 +397,13 @@ if (process.env.SMOKE) {
         if (!f) return done(false, 'no file was written')
         const { size } = fs.statSync(f)
         if (size < 10000) return done(false, `file is suspiciously small (${size}b)`)
-        // the duration patch is the whole reason preview/seeking works
-        const hasDuration = fs.readFileSync(f).subarray(0, 4096).includes(Buffer.from([0x44, 0x89]))
-        if (!hasDuration) return done(false, 'webm has no EBML Duration element')
+        const wantExt = await js('S.format')
+        if (path.extname(f) !== '.' + wantExt) return done(false, `saved ${path.extname(f)} but format is ${wantExt}`)
+        if (wantExt === 'webm') {
+          // the duration patch is the whole reason preview/seeking works
+          const hasDuration = fs.readFileSync(f).subarray(0, 4096).includes(Buffer.from([0x44, 0x89]))
+          if (!hasDuration) return done(false, 'webm has no EBML Duration element')
+        }
         done(true)
       } catch (e) {
         done(false, e.message)
