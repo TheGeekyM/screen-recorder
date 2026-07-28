@@ -1,12 +1,12 @@
 {
   "name": "screen-recorder",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Electron screen recorder with audio, floating control bar, region capture and a drawing overlay",
   "main": "main.js",
   "scripts": {
     "start": "electron . --no-sandbox --disable-gpu --in-process-gpu",
     "smoke": "SMOKE=1 electron . --no-sandbox --disable-gpu --in-process-gpu 2>&1 | tee /dev/stderr | grep -q \"SMOKE PASS\"",
-    "dist": "electron-builder --linux AppImage"
+    "dist": "electron-builder"
   },
   "type": "commonjs",
   "dependencies": {
@@ -37,12 +37,28 @@
     ],
     "linux": {
       "target": [
-        "AppImage"
+        "AppImage",
+        "deb"
       ],
       "category": "AudioVideo",
       "icon": "build/icon.png",
       "synopsis": "Screen recorder with audio and annotation",
       "syncDesktopName": true
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.video",
+      "identity": null
     },
     "asarUnpack": [
       "**/node_modules/ffmpeg-static/**"
