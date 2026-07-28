@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron . --no-sandbox --disable-gpu --in-process-gpu",
     "smoke": "SMOKE=1 electron . --no-sandbox --disable-gpu --in-process-gpu 2>&1 | tee /dev/stderr | grep -q \"SMOKE PASS\"",
-    "dist": "electron-builder"
+    "dist": "electron-builder --publish never"
   },
   "type": "commonjs",
   "dependencies": {
@@ -18,7 +18,8 @@
     "electron-builder": "^26.15.3"
   },
   "author": {
-    "name": "Mohamed Emad"
+    "name": "Mohamed Emad",
+    "email": "mohamed.emad@homzmzrt.com"
   },
   "license": "MIT",
   "build": {

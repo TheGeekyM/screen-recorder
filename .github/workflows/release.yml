@@ -10,6 +10,7 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
@@ -19,9 +20,9 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      # ponytail: mac is arm64-only (runner arch) — ffmpeg-static installs per-arch, so a
+      # cross-arch/universal build would ship the wrong ffmpeg. Add an x64 job if Intel users ask.
       - run: npm run dist
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # ponytail: publish via gh, not electron-builder's publisher — no provider config needed
       - run: |
           shopt -s nullglob
